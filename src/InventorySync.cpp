@@ -300,15 +300,22 @@ void InventorySync::EnforceCollectionState(ModState& state, const ItemMapping& i
 
     // Phase 3: Reusable tetrominos — reset "used" flag
     if (state.ReusableTetrominos) {
+        bool anyReset = false;
         try {
             for (auto& pair : *tmap) {
                 if (pair.Value == true) {
                     pair.Value = false;
+                    anyReset = true;
                 }
             }
         }
         catch (...) {
             // Reusable reset failed, non-critical
+        }
+        // Notify arranger panels that the inventory changed so
+        // pieces reset by the reusable option appear available again.
+        if (anyReset) {
+            RefreshUI();
         }
     }
 }
@@ -317,13 +324,50 @@ void InventorySync::EnforceCollectionState(ModState& state, const ItemMapping& i
 // RefreshUI
 // ============================================================
 
+static UFunction* s_fnBoolSet        = nullptr;
+static UFunction* s_fnUpdateInventory = nullptr;
+static bool       s_fnPuzzleResolved = false;
+
 void InventorySync::RefreshUI()
 {
-    // TODO: Implement stable UI refresh.
-    // The game's ArrangerInfoPanel::UpdateInventory() should be called
-    // after the CollectedTetrominos TMap is updated, but the current
-    // approach of finding the widget and calling it directly is unstable.
-    // Needs further investigation into safe access patterns.
+    // Refresh the in-game tetromino UI by calling UpdateInventory()
+    // on the ArrangerInfoPanel widget.
+    //
+    // Class hierarchy (from the original Lua implementation):
+    //   WBP_TalosUserWidget_C (Blueprint widget, extends UTalosHUD)
+    //     .ArrangerInfo → UArrangerInfoPanel
+    //       :UpdateInventory()  ← refreshes tetromino piece counters
+    //
+    // Both the HUD widget lookup and the ArrangerInfo property read
+    // use SEH-safe wrappers because AngelScript-bridged UObject access
+    // can throw access violations that C++ try/catch cannot intercept.
+
+    // Step 1: Find the live HUD widget by Blueprint class name.
+    UObject* hudWidget = SEH_FindFirstOf(STR("WBP_TalosUserWidget_C"));
+    if (!hudWidget) return;
+
+    // Step 2: Read the ArrangerInfo property → UArrangerInfoPanel.
+    UObject* arrangerInfo = nullptr;
+    try {
+        auto* ptr = hudWidget->GetValuePtrByPropertyNameInChain<UObject*>(STR("ArrangerInfo"));
+        if (ptr) arrangerInfo = *ptr;
+    }
+    catch (...) {
+        arrangerInfo = nullptr;
+    }
+    if (!arrangerInfo) return;
+
+    // Step 3: Find UpdateInventory UFunction (cached).
+    if (!s_fnUpdateInventory) {
+        s_fnUpdateInventory = SEH_GetFunctionByName(arrangerInfo, STR("UpdateInventory"));
+        if (!s_fnUpdateInventory) {
+            Output::send<LogLevel::Warning>(STR("[TalosAP] RefreshUI: UpdateInventory UFunction not found on ArrangerInfoPanel\n"));
+            return;
+        }
+    }
+
+    // Step 4: Call UpdateInventory() — no parameters, no return value.
+    SEH_ProcessEvent(arrangerInfo, s_fnUpdateInventory, nullptr);
 }
 
 // ============================================================
@@ -393,12 +437,10 @@ void InventorySync::DumpCollectedTetrominos(ModState& state, const ItemMapping& 
 // ResetCachedFunctions — call on level transition
 // ============================================================
 
-static UFunction* s_fnBoolSet        = nullptr;
-static bool       s_fnPuzzleResolved = false;
-
 void InventorySync::ResetCachedFunctions()
 {
     s_fnBoolSet        = nullptr;
+    s_fnUpdateInventory = nullptr;
     s_fnPuzzleResolved = false;
     s_solvedPuzzleCache.clear();
 
