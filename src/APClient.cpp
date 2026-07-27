@@ -185,10 +185,10 @@ bool APClientWrapper::Init(const Config& config, ModState& state, ItemMapping& i
         }
 
         // Read slot_data settings
-        if (slotData.contains("reusable_tetrominos")) {
-            int reusable = slotData["reusable_tetrominos"].get<int>();
+        if (slotData.contains("reusable_tetrominoes")) {
+            int reusable = slotData["reusable_tetrominoes"].get<int>();
             m_state->ReusableTetrominos = (reusable != 0);
-            Output::send<LogLevel::Verbose>(STR("[TalosAP] reusable_tetrominos = {}\n"),
+            Output::send<LogLevel::Verbose>(STR("[TalosAP] reusable_tetrominoes = {}\n"),
                 m_state->ReusableTetrominos ? L"true" : L"false");
         }
         if (slotData.contains("randomise_purple_sigils")) {
